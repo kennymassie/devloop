@@ -1,0 +1,108 @@
+"""Tests for documentation files: existence and YAML syntax validation."""
+
+import re
+from pathlib import Path
+
+import pytest
+import yaml
+
+
+DOCS_DIR = Path(__file__).resolve().parent.parent / "docs"
+
+EXPECTED_DOCS = [
+    "getting-started.md",
+    "temporal-prerequisites.md",
+]
+
+YAML_BLOCK_RE = re.compile(r"^```yaml\s*\n(.*?)^```", re.MULTILINE | re.DOTALL)
+
+
+def _extract_yaml_blocks(markdown_text: str) -> list[str]:
+    """Return all YAML code blocks from a markdown string."""
+    return [m.group(1).strip() for m in YAML_BLOCK_RE.finditer(markdown_text)]
+
+
+@pytest.mark.parametrize("filename", EXPECTED_DOCS)
+def test_doc_file_exists(filename):
+    path = DOCS_DIR / filename
+    assert path.exists(), f"{filename} not found in docs/"
+
+
+@pytest.mark.parametrize("filename", EXPECTED_DOCS)
+def test_yaml_blocks_parse_without_error(filename):
+    """Every fenced ```yaml block must be valid YAML."""
+    path = DOCS_DIR / filename
+    text = path.read_text()
+    blocks = _extract_yaml_blocks(text)
+
+    for i, block in enumerate(blocks):
+        if not block:
+            continue
+        try:
+            yaml.safe_load(block)
+        except yaml.YAMLError as exc:
+            pytest.fail(
+                f"{filename} YAML block {i + 1} is not valid: {exc}\n"
+                f"Block content:\n---\n{block}\n---"
+            )
+
+
+def test_getting_started_covers_temporal_install():
+    text = (DOCS_DIR / "getting-started.md").read_text()
+    assert "helm install temporal" in text
+
+
+def test_getting_started_covers_devloop_deploy():
+    text = (DOCS_DIR / "getting-started.md").read_text()
+    assert "helm install devloop" in text
+
+
+def test_getting_started_covers_project_enrollment():
+    text = (DOCS_DIR / "getting-started.md").read_text()
+    assert "projects.yaml" in text
+
+
+def test_getting_started_covers_agent_image_build():
+    text = (DOCS_DIR / "getting-started.md").read_text()
+    assert "devloop-agent-base" in text
+    assert "docker build" in text
+
+
+def test_getting_started_covers_verification():
+    text = (DOCS_DIR / "getting-started.md").read_text()
+    assert "kubectl get pods" in text
+
+
+def test_temporal_prerequisites_has_reference_values():
+    text = (DOCS_DIR / "temporal-prerequisites.md").read_text()
+    assert "sqlite" in text.lower()
+
+
+def test_getting_started_documents_required_fields():
+    """Project Registry schema must mention all required fields."""
+    text = (DOCS_DIR / "getting-started.md").read_text()
+    required = [
+        "id",
+        "github_url",
+        "default_branch",
+        "agent_image",
+        "agent_label",
+        "discord_channel",
+        "omneval_ingest_secret",
+        "github_token_secret",
+    ]
+    for field in required:
+        assert field in text, f"Required field '{field}' not documented"
+
+
+def test_getting_started_documents_optional_fields():
+    text = (DOCS_DIR / "getting-started.md").read_text()
+    assert "pr_reviewer" in text
+
+
+def test_getting_started_documents_config_settings():
+    """Guide must cover GITHUB_TOKEN, Discord bot token, and temporalHost."""
+    text = (DOCS_DIR / "getting-started.md").read_text()
+    assert "GITHUB_TOKEN" in text or "github_token" in text.lower()
+    assert "discord" in text.lower()
+    assert "temporalHost" in text

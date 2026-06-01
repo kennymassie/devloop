@@ -1,0 +1,106 @@
+# Temporal Prerequisites
+
+devloop requires a running Temporal cluster. The devloop Helm chart does **not** deploy Temporal — you must provide it independently. This guide shows how to install Temporal via the official [temporalio/helm-charts](https://github.com/temporalio/helm-charts) chart on a Kubernetes cluster.
+
+## Quick Install
+
+```bash
+helm repo add temporal https://charts.temporalio.io
+helm repo update
+helm install temporal temporal/temporal \
+  --namespace agents \
+  --create-namespace \
+  -f docs/reference-temporal-values.yaml
+```
+
+## Reference Values
+
+The following `values.yaml` is known to work with devloop. It deploys Temporal with SQLite and Dynamic Config suitable for development and small-scale production. For production workloads, replace SQLite with Postgres or MySQL.
+
+Save this as `reference-temporal-values.yaml`:
+
+```yaml
+# Reference Temporal Helm values for devloop
+# Source: https://github.com/temporalio/helm-charts
+# Tested with temporalio/helm-charts v0.0.2+
+
+persistence:
+  default:
+    driver: "sql"
+    options:
+      host: "temporal-sqlite"
+      port: 5432
+      user: "temporal"
+      password: "temporal"
+      database: "temporal"
+
+database:
+  setNull: true
+
+sqlite:
+  enabled: true
+  image:
+    repository: temporalio/sqlite
+    tag: latest
+
+dynamicConfig:
+  - value:
+      - "*..*"
+      - value:
+          limits.maxIDLength: 256
+      - constraints: {}
+  - value:
+      - "*.Matching.LongPollExpirationInterval"
+      - value:
+          days: 1
+      - constraints: {}
+
+web:
+  enabled: false
+
+ui:
+  enabled: false
+
+frontend:
+  service:
+    ports:
+      grpc: 7233
+  config:
+    publicClientHostPort: "temporal-frontend.agents.svc.cluster.local:7233"
+
+client:
+  host: "temporal-frontend.agents.svc.cluster.local"
+  port: 7233
+```
+
+## Verifying Temporal
+
+After installation, confirm the Temporal frontend is reachable:
+
+```bash
+kubectl get pods -n agents -l app=temporal
+kubectl port-forward svc/temporal-frontend -n agents 7233:7233
+```
+
+You can also use the Temporal CLI (`tctl`) to verify connectivity:
+
+```bash
+tctl --address 127.0.0.1:7233 operator cluster health
+```
+
+## Connecting devloop to Temporal
+
+Once Temporal is running, note its service address for the devloop Helm chart:
+
+```
+temporal-frontend.agents.svc.cluster.local:7233
+```
+
+This address becomes the `temporalHost` value in your devloop `values.yaml`. See [Getting Started](getting-started.md) for the next steps.
+
+## Production Considerations
+
+- Replace SQLite with Postgres or MySQL by setting `sqlite.enabled: false` and configuring `persistence.default` with your database credentials.
+- Enable the Temporal Web UI by setting `web.enabled: true` and `ui.enabled: true`.
+- Configure TLS, authentication, and resource limits per your cluster policies.
+- See the [Temporal Helm chart documentation](https://docs.temporal.io/application-development/fundamentals/deploy-temporal/deploy-in-production/kubernetes) for production hardening guidance.
