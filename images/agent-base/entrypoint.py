@@ -711,6 +711,30 @@ def _extract_diagnosis(text: str) -> dict | None:
         return _extract_json(inner)
 
 
+_REVIEW_RE = re.compile(r"<review>([\s\S]*?)</review>", re.IGNORECASE)
+
+
+def _extract_review(text: str) -> dict | None:
+    """Parse the ``<review>{...}</review>`` block the reviewer prompt emits:
+    ``{"summary": str, "inline_comments": [{"file","line","body"}]}``.
+
+    Only matches an explicit ``<review>`` block (unlike diagnosis, which falls
+    back to a brace scan) — the reviewer's free-text narration would otherwise be
+    misparsed as findings. Tolerant of a ```` ```json ```` fence inside the tags.
+    Returns None when no block is present or no JSON is recoverable."""
+    m = _REVIEW_RE.search(text or "")
+    if not m:
+        return None
+    inner = m.group(1).strip()
+    if inner.startswith("```"):
+        inner = re.sub(r"^```[a-zA-Z]*\n?", "", inner)
+        inner = re.sub(r"\n?```$", "", inner.strip())
+    try:
+        return json.loads(inner.strip())
+    except json.JSONDecodeError:
+        return _extract_json(inner)
+
+
 def _normalize_actions(actions) -> list[dict]:
     """Coerce the model's recommended_actions into ``[{action, requires_approval,
     rationale}]`` with a string command and a bool gate.
@@ -852,7 +876,8 @@ def handle_review(spec: TaskSpec, tracer) -> dict:
         with tracer.start_as_current_span("push"):
             push_branch(workdir, spec.branch, force=True)
     return {"status": "complete", "issue_number": spec.issue_number,
-            "branch": spec.branch, "commits": refinements, "summary": outcome.summary}
+            "branch": spec.branch, "commits": refinements,
+            "review": _extract_review(outcome.summary), "summary": outcome.summary}
 
 
 def handle_merge(spec: TaskSpec, tracer) -> dict:

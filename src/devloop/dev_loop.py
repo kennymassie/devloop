@@ -31,8 +31,10 @@ from .shared import (
     AnswerInput,
     AwaitInput,
     DispatchInput,
+    InlineComment,
     JobStatus,
     OpenAgentPRsInput,
+    PostCommentsInput,
     SendMessageInput,
     SendNotificationInput,
     TaskSpec,
@@ -324,6 +326,37 @@ class DevLoopWorkflow:
             )
         else:
             await self._notify(f"🔎 Reviewed #{issue_no} — no changes needed.")
+        await self._post_review_findings(inp, exec_result, result)
+
+    async def _post_review_findings(
+        self, inp: DevLoopInput, exec_result: dict, result: AgentJobResult
+    ) -> None:
+        """Post the reviewer's findings to the PR. No-ops when the review Agent
+        Execution Job returned no findings or the PR number can't be resolved."""
+        review = result.review or {}
+        summary = review.get("summary", "")
+        inline = [
+            InlineComment(
+                file=c.get("file", ""),
+                line=_as_int(c.get("line")),
+                body=c.get("body", ""),
+            )
+            for c in (review.get("inline_comments") or [])
+        ]
+        if not summary and not inline:
+            return
+        pr_number = logic.pr_number_from_url(exec_result.get("pr_url", ""))
+        if not pr_number:
+            return
+        await workflow.execute_activity(
+            "post_pr_comments",
+            PostCommentsInput(inp.project_id, pr_number, summary, inline),
+            start_to_close_timeout=timedelta(minutes=2),
+            retry_policy=_RETRY,
+        )
+        await self._notify(
+            f"💬 Posted review findings to {exec_result.get('pr_url') or f'#{pr_number}'}"
+        )
 
     # ---- Merge gate + Merge (#23) -------------------------------------- #
     async def _merge_phase(

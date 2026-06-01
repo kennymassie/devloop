@@ -33,10 +33,8 @@ from .k8s_jobs import (
     dispatch_agent_job,
 )
 from .github_ops import (
-    close_issues,
     file_issues,
     open_agent_pr_issue_numbers,
-    plan_issues,
     post_pr_comments,
 )
 from .summarize_activities import summarize_changes
@@ -63,10 +61,8 @@ ACTIVITIES = [
     answer_agent_job,
     await_agent_job,
     cleanup_agent_job,
-    plan_issues,
     post_pr_comments,
     file_issues,
-    close_issues,
     open_agent_pr_issue_numbers,
     summarize_changes,
 ]

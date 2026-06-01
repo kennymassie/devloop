@@ -8,9 +8,8 @@ from __future__ import annotations
 
 import re
 
-from .shared import Verdict
-
 _APPROVE_TOKENS = ("approve", "approved", "yes", "lgtm", "✅", "👍")
+_PR_NUMBER = re.compile(r"/pull/(\d+)")
 
 
 def is_approval(reply: str) -> bool:
@@ -21,21 +20,10 @@ def is_approval(reply: str) -> bool:
     return any(tok in low for tok in _APPROVE_TOKENS)
 
 
-def parse_merge_reply(reply: str, reviewed: list[tuple[int, str]]) -> list[int]:
-    """Resolve which issue numbers to merge from a Discord reply.
-
-    Retained for callers that gate several branches at once; the sequential Dev
-    Loop gates one issue per round and uses :func:`is_approval` instead.
-
-    * "all passed" → every branch whose verdict is ``pass`` or ``warn``.
-    * otherwise → the explicit issue numbers named in the reply.
-    """
-    low = (reply or "").strip().lower()
-    reviewed_map = dict(reviewed)
-    if "all passed" in low or low in {"all", "merge all"}:
-        return [n for n, v in reviewed if v in (Verdict.PASS.value, Verdict.WARN.value)]
-    wanted = {int(m) for m in re.findall(r"#?(\d+)", low)}
-    return [n for n in reviewed_map if n in wanted]
+def pr_number_from_url(pr_url: str) -> int:
+    """Extract the PR number from a GitHub PR URL (``…/pull/<N>``); 0 if absent."""
+    m = _PR_NUMBER.search(pr_url or "")
+    return int(m.group(1)) if m else 0
 
 
 # --------------------------------------------------------------------------- #

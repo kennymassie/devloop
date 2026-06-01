@@ -131,6 +131,29 @@ def test_extract_plan_handles_missing_block():
     assert entrypoint._extract_plan("<plan>{\"issues\": []}</plan>") == {"issues": []}
 
 
+def test_extract_review_parses_block():
+    text = (
+        "Some narration the reviewer wrote.\n"
+        "<review>\n"
+        '{"summary": "looks good", '
+        '"inline_comments": [{"file": "a.py", "line": 3, "body": "nit"}]}\n'
+        "</review>\n"
+    )
+    review = entrypoint._extract_review(text)
+    assert review["summary"] == "looks good"
+    assert review["inline_comments"][0]["line"] == 3
+
+
+def test_extract_review_tolerates_json_fence():
+    text = '<review>```json\n{"summary": "ok", "inline_comments": []}\n```</review>'
+    assert entrypoint._extract_review(text) == {"summary": "ok", "inline_comments": []}
+
+
+def test_extract_review_missing_block_is_none():
+    # Free-text narration must NOT be misparsed as findings.
+    assert entrypoint._extract_review("I reviewed it and it's fine.") is None
+
+
 def test_unknown_phase_writes_failure(tmp_path, monkeypatch):
     out_file = tmp_path / "out.json"
     monkeypatch.setenv("TASK_SPEC", json.dumps({"phase": "bogus", "project_id": "x"}))

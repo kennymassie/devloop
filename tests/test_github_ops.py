@@ -5,14 +5,12 @@ from temporalio.testing import ActivityEnvironment
 
 from devloop import github_ops
 from devloop.github_ops import (
-    CloseIssuesInput,
     FileIssuesInput,
     NewIssue,
-    PlanInput,
-    close_issues,
     file_issues,
-    plan_issues,
+    post_pr_comments,
 )
+from devloop.shared import InlineComment, PostCommentsInput
 from devloop.projects import ProjectConfig, _REGISTRY
 
 _PROJECT = ProjectConfig(
@@ -73,20 +71,6 @@ class FakeClient:
 
 
 @pytest.mark.asyncio
-async def test_plan_issues_orders_and_fetches(monkeypatch):
-    pages = [
-        [
-            {"number": 2, "title": "B", "body": "after #1"},
-            {"number": 1, "title": "A", "body": ""},
-        ],
-        [],
-    ]
-    monkeypatch.setattr(github_ops, "_client", lambda cfg: FakeClient(get_pages=pages))
-    plan = await ActivityEnvironment().run(plan_issues, PlanInput("omneval"))
-    assert [i.number for i in plan.issues] == [1, 2]
-
-
-@pytest.mark.asyncio
 async def test_file_issues_applies_agent_label(monkeypatch):
     posts = []
     monkeypatch.setattr(
@@ -100,18 +84,32 @@ async def test_file_issues_applies_agent_label(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_close_issues_comments_then_closes(monkeypatch):
-    posts, patches = [], []
+async def test_post_pr_comments_posts_summary(monkeypatch):
+    posts = []
+    monkeypatch.setattr(
+        github_ops, "_client", lambda cfg: FakeClient(post_capture=posts)
+    )
+    await ActivityEnvironment().run(
+        post_pr_comments, PostCommentsInput("omneval", 7, "looks good", [])
+    )
+    assert any("/issues/7/comments" in url for url, _ in posts)
+    assert "looks good" in posts[0][1]["body"]
+
+
+@pytest.mark.asyncio
+async def test_post_pr_comments_posts_inline(monkeypatch):
+    posts = []
+    pages = [{"head": {"sha": "deadbeef"}}]  # the c.get(/pulls/7) for the commit SHA
     monkeypatch.setattr(
         github_ops,
         "_client",
-        lambda cfg: FakeClient(post_capture=posts, patch_capture=patches),
+        lambda cfg: FakeClient(get_pages=pages, post_capture=posts),
     )
     await ActivityEnvironment().run(
-        close_issues, CloseIssuesInput("omneval", [3], comment="merged in abc")
+        post_pr_comments,
+        PostCommentsInput("omneval", 7, "summary", [InlineComment("a.py", 3, "note")]),
     )
-    assert any("comments" in url for url, _ in posts)
-    assert patches[0][1]["state"] == "closed"
+    assert any("/pulls/7/reviews" in url for url, _ in posts)
 
 
 # --------------------------------------------------------------------------- #

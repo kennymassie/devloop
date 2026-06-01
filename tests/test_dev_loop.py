@@ -40,12 +40,14 @@ class Mocks:
     execute_commits: int = 1
     execute_status: str = JobStatus.COMPLETE.value
     review_commits: int = 1
+    review_payload: dict | None = None  # AgentJobResult.review the review job returns
     merge_status: str = JobStatus.COMPLETE.value
     await_status: str = JobStatus.COMPLETE.value
     # recorders
     notifications: list = field(default_factory=list)
     messages: list = field(default_factory=list)
     answers: list = field(default_factory=list)
+    post_comments: list = field(default_factory=list)
     dispatched_phases: list = field(default_factory=list)
     # issue numbers the "open_agent_pr_issue_numbers" activity reports as already
     # having an open review PR (planner should skip these)
@@ -110,6 +112,7 @@ def _make_activities():
                 job_name=f"r{issue}",
                 issue_number=issue,
                 commits=M.review_commits,
+                review=M.review_payload,
             )
         if phase == "merge":
             return AgentJobResult(
@@ -160,12 +163,18 @@ def _make_activities():
     async def open_agent_pr_issue_numbers(inp) -> list:
         return list(M.open_agent_prs)
 
+    @activity.defn(name="post_pr_comments")
+    async def post_pr_comments(inp) -> None:
+        M.dispatched_phases.append("post_pr_comments")
+        M.post_comments.append(inp)
+
     return (
         [
             dispatch_agent_job,
             answer_agent_job,
             await_agent_job,
             open_agent_pr_issue_numbers,
+            post_pr_comments,
         ],
         [send_message, send_notification],
     )
@@ -359,3 +368,35 @@ async def test_merge_failure_terminates(reset_mocks):
     result = await _env_and_run(DevLoopInput("omneval"), ["approve", "approve"])
     assert result.status == "failed_merge"
     assert any("merge #1 failed" in n.lower() for n in M.notifications)
+
+
+# --------------------------------------------------------------------------- #
+# Review phase posts findings to the PR (#22)
+# --------------------------------------------------------------------------- #
+def _field(obj, name):
+    return obj[name] if isinstance(obj, dict) else getattr(obj, name)
+
+
+@pytest.mark.asyncio
+async def test_review_posts_findings_to_pr(reset_mocks):
+    reset_mocks.plan_rounds = [_one_issue(1)]
+    reset_mocks.review_payload = {
+        "summary": "looks good, tightened error handling",
+        "inline_comments": [{"file": "a.py", "line": 3, "body": "nit"}],
+    }
+    result = await _env_and_run(DevLoopInput("omneval"), ["approve", "approve"])
+    assert result.status == "completed"
+    assert "post_pr_comments" in M.dispatched_phases
+    posted = M.post_comments[0]
+    assert "tightened error handling" in _field(posted, "summary")
+    # PR number parsed from the execute phase's pr_url (…/pull/1)
+    assert _field(posted, "pr_number") == 1
+
+
+@pytest.mark.asyncio
+async def test_review_no_findings_skips_post(reset_mocks):
+    reset_mocks.plan_rounds = [_one_issue(1)]
+    reset_mocks.review_payload = None  # reviewer returned no structured findings
+    result = await _env_and_run(DevLoopInput("omneval"), ["approve", "approve"])
+    assert result.status == "completed"
+    assert "post_pr_comments" not in M.dispatched_phases

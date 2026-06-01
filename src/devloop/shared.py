@@ -36,12 +36,6 @@ class JobStatus(str, Enum):
     AWAITING_HUMAN = "awaiting_human"
 
 
-class Verdict(str, Enum):
-    PASS = "pass"
-    WARN = "warn"
-    FAIL = "fail"
-
-
 # ---------------------------------------------------------------------------
 # Discord activity I/O (mirror of images/discord-bot/activities.py dataclasses)
 # ---------------------------------------------------------------------------
@@ -72,42 +66,33 @@ class ArchiveThreadInput:
 
 
 # ---------------------------------------------------------------------------
-# Planning / execution model
+# GitHub activity I/O
 # ---------------------------------------------------------------------------
 
 
 @dataclass
-class PlannedIssue:
-    number: int
-    title: str
-    body: str = ""
-    depends_on: list[int] = field(default_factory=list)
+class InlineComment:
+    file: str
+    line: int
+    body: str
 
 
 @dataclass
-class ExecutionPlan:
-    project_id: str
-    issues: list[PlannedIssue] = field(default_factory=list)
+class PostCommentsInput:
+    """Reviewer findings posted to a PR: a PR-level ``summary`` plus optional
+    line-anchored ``inline_comments``. Built by the workflow from the review
+    Agent Execution Job's ``review`` payload, consumed by the ``post_pr_comments``
+    activity."""
 
-    def render(self) -> str:
-        if not self.issues:
-            return "_No open agent-ready issues to plan._"
-        lines = [
-            f"**Execution plan for `{self.project_id}`** ({len(self.issues)} issue(s)):",
-            "",
-        ]
-        for i, issue in enumerate(self.issues, 1):
-            dep = (
-                f" (after #{', #'.join(map(str, issue.depends_on))})"
-                if issue.depends_on
-                else ""
-            )
-            lines.append(f"{i}. #{issue.number} — {issue.title}{dep}")
-        lines += [
-            "",
-            "Reply **approve** to proceed, or reply with feedback to re-plan.",
-        ]
-        return "\n".join(lines)
+    project_id: str
+    pr_number: int
+    summary: str
+    inline_comments: list[InlineComment] = field(default_factory=list)
+
+
+# ---------------------------------------------------------------------------
+# Execution model
+# ---------------------------------------------------------------------------
 
 
 @dataclass

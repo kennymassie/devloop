@@ -50,4 +50,25 @@ If you find improvements to make:
 
 If the code is already clean and well-structured, do nothing.
 
+# REPORT YOUR FINDINGS
+
+After making any refinements, summarise your review so it can be posted to the
+pull request. Emit a single `<review>` block containing JSON with a plain-English
+`summary` of what you found (and any refinements you made), plus optional
+`inline_comments` anchoring specific notes to a file and line:
+
+```
+<review>
+{
+  "summary": "Tightened error handling in the parser; the change otherwise looks correct and is well tested.",
+  "inline_comments": [
+    {"file": "src/foo.py", "line": 42, "body": "This branch is unreachable — `n` is always > 0 here."}
+  ]
+}
+</review>
+```
+
+`inline_comments` may be an empty list. If the code was already clean and you made
+no changes, still emit a `<review>` block with a short `summary` saying so.
+
 Once complete, YOU MUST output exactly <promise>COMPLETE</promise>.
