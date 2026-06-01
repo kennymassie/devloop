@@ -13,13 +13,13 @@ import os
 
 from temporalio import activity
 
+from . import cluster
 from .github_ops import _client  # reuse the authed httpx client
 from .projects import get_project, parse_github_repo
 from .summarization import SummarizeInput, SummarizeResult
 
 log = logging.getLogger(__name__)
 
-NAMESPACE = os.getenv("AGENTS_NAMESPACE", "agents")
 STATE_CONFIGMAP = os.getenv("SUMMARY_STATE_CONFIGMAP", "dev-loop-summary-state")
 OPENAI_BASE_URL = os.getenv("AGENT_OPENAI_BASE_URL", "http://192.168.68.104/v1")
 SUMMARY_MODEL = os.getenv("SUMMARY_MODEL", "qwen3-27b")
@@ -53,40 +53,18 @@ def build_prompt(commits: list[str], issues: list[dict]) -> str:
 
 
 # --------------------------------------------------------------------------- #
-# kubernetes ConfigMap state (patched in tests)
+# Dedup state — last-summarized SHA per project, kept in a ConfigMap
 # --------------------------------------------------------------------------- #
-def _core():
-    from kubernetes import client, config
-
-    try:
-        config.load_incluster_config()
-    except config.ConfigException:
-        config.load_kube_config()
-    return client.CoreV1Api()
-
-
 def get_last_sha(project_id: str) -> str:
-    from kubernetes.client.exceptions import ApiException
-
-    try:
-        cm = _core().read_namespaced_config_map(STATE_CONFIGMAP, NAMESPACE)
-        data = (cm.data or {}) if not isinstance(cm, dict) else cm.get("data", {})
-        return json.loads(data.get("last-sha", "{}")).get(project_id, "")
-    except ApiException as exc:
-        if getattr(exc, "status", None) == 404:
-            return ""
-        raise
+    data = cluster.read_configmap_data(STATE_CONFIGMAP) or {}
+    return json.loads(data.get("last-sha", "{}")).get(project_id, "")
 
 
 def set_last_sha(project_id: str, sha: str) -> None:
-    core = _core()
-    cm = core.read_namespaced_config_map(STATE_CONFIGMAP, NAMESPACE)
-    data = (cm.data or {}) if not isinstance(cm, dict) else cm.get("data", {})
+    data = cluster.read_configmap_data(STATE_CONFIGMAP) or {}
     mapping = json.loads(data.get("last-sha", "{}"))
     mapping[project_id] = sha
-    core.patch_namespaced_config_map(
-        STATE_CONFIGMAP, NAMESPACE, {"data": {"last-sha": json.dumps(mapping)}}
-    )
+    cluster.patch_configmap_data(STATE_CONFIGMAP, {"last-sha": json.dumps(mapping)})
 
 
 # --------------------------------------------------------------------------- #

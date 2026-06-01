@@ -6,8 +6,9 @@ to a terminal state, and reads the output ConfigMap the Job writes.
 
 Design notes
 ------------
-* The kubernetes client is reached through ``_batch()`` / ``_core()`` so unit
-  tests can monkeypatch those without a cluster.
+* The kubernetes client is reached through the ``cluster`` module
+  (``cluster.batch()`` / ``cluster.core()`` and its ConfigMap helpers) so unit
+  tests can monkeypatch one seam without a cluster.
 * A failed Job (or a Job whose output ConfigMap reports ``failed``) raises an
   exception so Temporal's retry policy (max 3) re-runs the activity. Each
   attempt gets a fresh Job name (``…-a<attempt>``).
@@ -29,12 +30,13 @@ import os
 from temporalio import activity
 from temporalio.exceptions import ApplicationError
 
+from . import cluster
+from .cluster import NAMESPACE
 from .shared import AgentJobResult, AnswerInput, AwaitInput, DispatchInput, JobStatus
 from .projects import get_project
 
 log = logging.getLogger(__name__)
 
-NAMESPACE = os.getenv("AGENTS_NAMESPACE", "agents")
 SERVICE_ACCOUNT = os.getenv("AGENT_JOB_SERVICE_ACCOUNT", "agent-job")
 TEMPORAL_HOST = os.getenv("TEMPORAL_HOST", "localhost:7233")
 OMNEVAL_OTLP_ENDPOINT = os.getenv(
@@ -49,32 +51,6 @@ AGENT_BASE_IMAGE = os.getenv(
 DEFAULT_CPU = os.getenv("AGENT_JOB_CPU", "2")
 DEFAULT_MEMORY = os.getenv("AGENT_JOB_MEMORY", "4Gi")
 JOB_ACTIVE_DEADLINE = int(os.getenv("AGENT_JOB_ACTIVE_DEADLINE", "7200"))
-
-
-# --------------------------------------------------------------------------- #
-# kubernetes client accessors (patched in tests)
-# --------------------------------------------------------------------------- #
-def _load_config() -> None:
-    from kubernetes import config
-
-    try:
-        config.load_incluster_config()
-    except config.ConfigException:
-        config.load_kube_config()
-
-
-def _batch():
-    from kubernetes import client
-
-    _load_config()
-    return client.BatchV1Api()
-
-
-def _core():
-    from kubernetes import client
-
-    _load_config()
-    return client.CoreV1Api()
 
 
 # --------------------------------------------------------------------------- #
@@ -257,17 +233,11 @@ def render_job(d: DispatchInput, job_name: str) -> dict:
 # --------------------------------------------------------------------------- #
 # ConfigMap read/write helpers
 # --------------------------------------------------------------------------- #
-def _read_output(core, job_name: str) -> dict | None:
+def _read_output(job_name: str) -> dict | None:
     """Return the parsed output ConfigMap payload, or None if not yet written."""
-    from kubernetes.client.exceptions import ApiException
-
-    try:
-        cm = core.read_namespaced_config_map(job_name, NAMESPACE)
-    except ApiException as exc:  # 404 = job hasn't written output yet
-        if getattr(exc, "status", None) == 404:
-            return None
-        raise
-    data = (cm.data or {}) if not isinstance(cm, dict) else cm.get("data", {})
+    data = cluster.read_configmap_data(job_name)
+    if not data:
+        return None
     raw = data.get("result")
     if not raw:
         return None
@@ -318,11 +288,11 @@ def _job_terminal(job) -> str | None:
 # Polling
 # --------------------------------------------------------------------------- #
 async def _poll_to_terminal(
-    core, batch, job_name: str, d: DispatchInput
+    batch, job_name: str, d: DispatchInput
 ) -> AgentJobResult:
     """Poll a running Job until terminal or until it asks a human a question."""
     while True:
-        payload = _read_output(core, job_name)
+        payload = _read_output(job_name)
         if payload and payload.get("status") == JobStatus.AWAITING_HUMAN.value:
             log.info("job %s is awaiting a human reply", job_name)
             return _result_from_payload(payload, job_name)
@@ -330,12 +300,10 @@ async def _poll_to_terminal(
         job = batch.read_namespaced_job_status(job_name, NAMESPACE)
         terminal = _job_terminal(job)
         if terminal == "complete":
-            payload = _read_output(core, job_name) or {
-                "status": JobStatus.COMPLETE.value
-            }
+            payload = _read_output(job_name) or {"status": JobStatus.COMPLETE.value}
             return _result_from_payload(payload, job_name)
         if terminal == "failed":
-            payload = _read_output(core, job_name) or {}
+            payload = _read_output(job_name) or {}
             err = payload.get("error", f"Job {job_name} failed without output")
             raise ApplicationError(f"agent job failed: {err}", type="AgentJobFailed")
 
@@ -362,7 +330,7 @@ async def dispatch_agent_job(d: DispatchInput) -> AgentJobResult:
     job_name = job_name_for(d, attempt, discriminator)
     manifest = render_job(d, job_name)
 
-    batch, core = _batch(), _core()
+    batch = cluster.batch()
 
     from kubernetes.client.exceptions import ApiException
 
@@ -374,18 +342,13 @@ async def dispatch_agent_job(d: DispatchInput) -> AgentJobResult:
             raise
         log.info("job %s already exists, attaching", job_name)
 
-    return await _poll_to_terminal(core, batch, job_name, d)
+    return await _poll_to_terminal(batch, job_name, d)
 
 
 @activity.defn
 async def answer_agent_job(inp: AnswerInput) -> None:
     """Write a human's reply to the Job's input ConfigMap so it can resume."""
-    core = _core()
-    core.patch_namespaced_config_map(
-        inp.job_name,
-        NAMESPACE,
-        {"data": {"human_answer": inp.answer}},
-    )
+    cluster.patch_configmap_data(inp.job_name, {"human_answer": inp.answer})
     log.info("answered job %s", inp.job_name)
 
 
@@ -398,7 +361,7 @@ async def await_agent_job(inp: AwaitInput) -> AgentJobResult:
         task_spec=inp.task_spec,
         poll_interval_seconds=inp.poll_interval_seconds,
     )
-    return await _poll_to_terminal(_core(), _batch(), inp.job_name, d)
+    return await _poll_to_terminal(cluster.batch(), inp.job_name, d)
 
 
 @activity.defn
@@ -407,7 +370,7 @@ async def cleanup_agent_job(job_name: str) -> None:
     from kubernetes.client import V1DeleteOptions
     from kubernetes.client.exceptions import ApiException
 
-    batch, core = _batch(), _core()
+    batch, core = cluster.batch(), cluster.core()
     for fn in (
         lambda: batch.delete_namespaced_job(
             job_name, NAMESPACE, body=V1DeleteOptions(propagation_policy="Background")

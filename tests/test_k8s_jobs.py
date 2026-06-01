@@ -91,8 +91,8 @@ class FakeCore:
 
 
 def _patch(monkeypatch, batch, core):
-    monkeypatch.setattr(k8s_jobs, "_batch", lambda: batch)
-    monkeypatch.setattr(k8s_jobs, "_core", lambda: core)
+    monkeypatch.setattr(k8s_jobs.cluster, "batch", lambda: batch)
+    monkeypatch.setattr(k8s_jobs.cluster, "core", lambda: core)
 
 
 def _dispatch_input(**kw):

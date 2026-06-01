@@ -8,7 +8,6 @@ different orgs/owners use different credentials.
 
 from __future__ import annotations
 
-import base64
 import logging
 import os
 import re
@@ -17,13 +16,13 @@ from typing import Any
 
 from temporalio import activity
 
+from . import cluster
 from .projects import ProjectConfig, get_project, parse_github_repo
 from .shared import OpenAgentPRsInput, PostCommentsInput
 
 log = logging.getLogger(__name__)
 
 GITHUB_API = os.getenv("GITHUB_API", "https://api.github.com")
-NAMESPACE = os.getenv("AGENTS_NAMESPACE", "agents")
 
 # Agent issue branches are named ``agent/issue-<N>[-slug]`` (see entrypoint.py).
 _AGENT_BRANCH = re.compile(r"^agent/issue-(\d+)")
@@ -50,19 +49,6 @@ def agent_pr_issue_numbers(pulls: list[dict[str, Any]]) -> list[int]:
 # --------------------------------------------------------------------------- #
 # HTTP helpers
 # --------------------------------------------------------------------------- #
-def _read_token(secret_name: str) -> str:
-    """Read ``GITHUB_TOKEN`` from the named Secret in the agents namespace."""
-    from kubernetes import client, config
-
-    try:
-        config.load_incluster_config()
-    except config.ConfigException:
-        config.load_kube_config()
-    sec = client.CoreV1Api().read_namespaced_secret(secret_name, NAMESPACE)
-    raw = (sec.data or {}).get("GITHUB_TOKEN", "")
-    return base64.b64decode(raw).decode() if raw else ""
-
-
 def _headers(token: str) -> dict[str, str]:
     return {
         "Authorization": f"Bearer {token}",
@@ -74,7 +60,7 @@ def _headers(token: str) -> dict[str, str]:
 def _client(cfg: ProjectConfig):
     import httpx
 
-    token = _read_token(cfg.github_token_secret)
+    token = cluster.read_secret_value(cfg.github_token_secret, "GITHUB_TOKEN")
     return httpx.Client(base_url=GITHUB_API, headers=_headers(token), timeout=30.0)
 
 
