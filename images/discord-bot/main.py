@@ -25,7 +25,7 @@ logging.basicConfig(
 log = logging.getLogger(__name__)
 
 TEMPORAL_HOST = os.getenv("TEMPORAL_HOST", "temporal-frontend.agents.svc:7233")
-TASK_QUEUE = os.getenv("TASK_QUEUE", "discord-bot")
+TASK_QUEUE = os.getenv("MESSAGING_TASK_QUEUE") or os.getenv("TASK_QUEUE", "discord-bot")
 DISCORD_TOKEN = os.environ["DISCORD_TOKEN"]
 HEALTH_PORT = int(os.getenv("HEALTH_PORT", "8080"))
 

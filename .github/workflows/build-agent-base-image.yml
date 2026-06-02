@@ -37,7 +37,7 @@ jobs:
 
       - name: Run entrypoint tests
         working-directory: images/agent-base
-        run: uv run --no-project --with pytest --with pytest-asyncio pytest -q
+        run: uv run --with pytest --with pytest-asyncio pytest -q
 
   build_and_push:
     name: Build and push agent-base to GHCR

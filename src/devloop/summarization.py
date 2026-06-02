@@ -16,7 +16,7 @@ from datetime import timedelta
 from temporalio import workflow
 from temporalio.common import RetryPolicy
 
-from .shared import CHANNEL_CHANGELOG, DISCORD_QUEUE, SendMessageInput
+from .shared import CHANNEL_CHANGELOG, MESSAGING_QUEUE, SendMessageInput
 
 _RETRY = RetryPolicy(maximum_attempts=3)
 
@@ -62,7 +62,7 @@ class SummarizationWorkflow:
                 channel=CHANNEL_CHANGELOG,
                 thread_name=title,
             ),
-            task_queue=DISCORD_QUEUE,
+            task_queue=MESSAGING_QUEUE,
             start_to_close_timeout=timedelta(seconds=60),
             retry_policy=_RETRY,
         )

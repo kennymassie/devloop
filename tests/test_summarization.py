@@ -11,7 +11,7 @@ from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Worker
 
 from devloop.shared import (
-    DISCORD_QUEUE,
+    MESSAGING_QUEUE,
     ORCHESTRATION_QUEUE,
     SendMessageInput,
     SendMessageOutput,
@@ -62,7 +62,7 @@ async def _run(inp: SummarizeInput):
                 workflows=[SummarizationWorkflow],
                 activities=orch,
             ),
-            Worker(env.client, task_queue=DISCORD_QUEUE, activities=disc),
+            Worker(env.client, task_queue=MESSAGING_QUEUE, activities=disc),
         ):
             return await env.client.execute_workflow(
                 SummarizationWorkflow.run,

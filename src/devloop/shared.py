@@ -8,12 +8,16 @@ standard library — no I/O, no threading, no network clients.
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import asdict, dataclass, field
 from enum import Enum
 
-# Task queues
-ORCHESTRATION_QUEUE = "devloop-orchestration"
-DISCORD_QUEUE = "discord-bot"
+# Task queues — override via env vars to match helm chart values.
+# MESSAGING_TASK_QUEUE is the queue name for whichever messaging platform bot is
+# deployed (discord-bot, slack-bot, etc.); set it in helm values alongside the
+# bot's own TASK_QUEUE so both sides agree on the queue name.
+ORCHESTRATION_QUEUE = os.getenv("ORCHESTRATION_QUEUE", "devloop-orchestration")
+MESSAGING_QUEUE = os.getenv("MESSAGING_TASK_QUEUE", "discord-bot")
 
 # Discord channel logical names (resolved to IDs inside the bot)
 CHANNEL_APPROVALS = "approvals"

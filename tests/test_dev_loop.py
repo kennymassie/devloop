@@ -15,7 +15,7 @@ from temporalio.worker import Worker
 from devloop import dev_loop_logic as logic
 from devloop.dev_loop import DevLoopInput, DevLoopWorkflow
 from devloop.shared import (
-    DISCORD_QUEUE,
+    MESSAGING_QUEUE,
     ORCHESTRATION_QUEUE,
     AgentJobResult,
     JobStatus,
@@ -210,7 +210,7 @@ async def _env_and_run(inp: DevLoopInput, replies: list[str]):
                 workflows=[DevLoopWorkflow],
                 activities=orch_acts,
             ),
-            Worker(env.client, task_queue=DISCORD_QUEUE, activities=discord_acts),
+            Worker(env.client, task_queue=MESSAGING_QUEUE, activities=discord_acts),
         ):
             return await _run_devloop(env.client, inp, replies)
 

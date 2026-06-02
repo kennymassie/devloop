@@ -26,7 +26,7 @@ from temporalio.common import RetryPolicy
 from . import dev_loop_logic as logic
 from .shared import (
     CHANNEL_APPROVALS,
-    DISCORD_QUEUE,
+    MESSAGING_QUEUE,
     AgentJobResult,
     AnswerInput,
     AwaitInput,
@@ -96,7 +96,7 @@ class DevLoopWorkflow:
         await workflow.execute_activity(
             "send_message",
             SendMessageInput(self._wid(), message, channel, thread_name),
-            task_queue=DISCORD_QUEUE,
+            task_queue=MESSAGING_QUEUE,
             start_to_close_timeout=_DISCORD_TIMEOUT,
             retry_policy=_RETRY,
         )
@@ -105,7 +105,7 @@ class DevLoopWorkflow:
         await workflow.execute_activity(
             "send_notification",
             SendNotificationInput(self._wid(), message),
-            task_queue=DISCORD_QUEUE,
+            task_queue=MESSAGING_QUEUE,
             start_to_close_timeout=_DISCORD_TIMEOUT,
             retry_policy=_RETRY,
         )
