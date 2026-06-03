@@ -1,9 +1,12 @@
-"""Discord Bot entry point.
+"""Discord Bot entry point (issue #29).
 
 Starts three concurrent tasks in one asyncio event loop:
-  1. Discord gateway client (discord.py)
+  1. Discord gateway client (devloop.messaging.discord_bot)
   2. Temporal Activity Worker polling the `discord-bot` task queue
   3. HTTP health server on HEALTH_PORT for Kubernetes probes
+
+All business logic lives in the devloop.messaging package.  This file
+only wires the pieces together.
 """
 
 import asyncio
@@ -15,8 +18,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from temporalio.client import Client
 from temporalio.worker import Worker
 
-from activities import DiscordActivities
-from discord_client import BotClient
+from devloop.messaging.discord_bot import BotClient, DiscordActivities
 
 logging.basicConfig(
     level=logging.INFO,
@@ -55,7 +57,7 @@ async def main() -> None:
     temporal_client = await Client.connect(TEMPORAL_HOST)
     log.info("connected to temporal at %s", TEMPORAL_HOST)
 
-    bot = BotClient(temporal_client)
+    bot = BotClient(token=DISCORD_TOKEN, temporal_client=temporal_client)
     activities = DiscordActivities(bot)
 
     worker = Worker(

@@ -1,12 +1,15 @@
-"""Slack Bot entry point.
+"""Slack Bot entry point (issue #29).
 
 Starts three concurrent tasks in one asyncio event loop:
-  1. Slack Socket Mode handler (bolt SocketModeHandler)
+  1. Slack Socket Mode handler (devloop.messaging.slack_bot)
   2. Temporal Activity Worker polling the ``slack-bot`` task queue
   3. HTTP health server on HEALTH_PORT for Kubernetes probes
 
 Socket Mode means no public inbound port is required — parity with the Discord
 gateway connection model.
+
+All business logic lives in the devloop.messaging package.  This file
+only wires the pieces together.
 """
 
 import asyncio
@@ -18,8 +21,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from temporalio.client import Client
 from temporalio.worker import Worker
 
-from activities import SlackActivities
-from slack_client import create_bot
+from devloop.messaging.slack_bot import BotClient, SlackActivities, _create_bot_app
 
 logging.basicConfig(
     level=logging.INFO,
@@ -59,7 +61,7 @@ async def main() -> None:
     temporal_client = await Client.connect(TEMPORAL_HOST)
     log.info("connected to temporal at %s", TEMPORAL_HOST)
 
-    bot, _app, handler = create_bot(
+    bot, handler = _create_bot_app(
         SLACK_BOT_TOKEN, SLACK_APP_TOKEN, temporal_client
     )
     activities = SlackActivities(bot)

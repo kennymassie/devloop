@@ -8,7 +8,8 @@ WORKDIR /app
 COPY pyproject.toml uv.lock .
 RUN UV_HTTP_TIMEOUT=300 uv pip install --system --no-cache .
 
-COPY thread_store.py activities.py discord_client.py text_utils.py main.py ./
+# Only main.py here — all business logic is in the devloop.messaging package.
+COPY main.py ./
 
 EXPOSE 8080
 
