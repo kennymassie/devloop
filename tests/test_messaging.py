@@ -374,7 +374,6 @@ def test_clamp_exact_limit_unchanged():
 # --------------------------------------------------------------------------- #
 
 
-import json  # noqa: E402
 import types  # noqa: E402
 
 import pytest  # noqa: E402
