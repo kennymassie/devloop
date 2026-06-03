@@ -3,7 +3,7 @@
 {{- range $idx, $project := .Values.poller.projects }}
 {{- $sanitizedRepoName := regexReplaceAll "[^a-zA-Z0-9]" .repo "" | lower | trunc 52 -}}
 {{- /* A Kubernetes label value cannot contain "/" (as in owner/name), so derive a valid value. */ -}}
-{{- $projectLabel := .repo | replace "/" "." | trunc 63 | trimSuffix "." -}}
+{{- $projectLabel := .repo | replace "/" "." | trunc 63 | trimSuffix "." }}
 ---
 apiVersion: apps/v1
 kind: Deployment
