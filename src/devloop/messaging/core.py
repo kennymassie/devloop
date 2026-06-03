@@ -1,10 +1,8 @@
-"""Messaging platform abstraction for omneval-devloop.
+"""Messaging platform abstraction and Temporal activity wrapper (issue #19).
 
-Defines the ``MessagingPlatform`` protocol that every messaging bridge
-(Discord, Slack, etc.) must implement.  Provides generic activity wrappers
-so Temporal workflows dispatch through a platform-agnostic interface.
-
-See issue #19: <https://github.com/omneval/devloop/issues/19>
+Defines the ``MessagingPlatform`` protocol that any messaging bridge (Discord,
+Slack, etc.) must implement, the ``MessagingActivities`` generic Temporal
+activity wrapper, and shared data contracts.
 """
 
 from __future__ import annotations
@@ -14,7 +12,7 @@ import uuid
 from dataclasses import dataclass
 from typing import Any, Protocol, runtime_checkable
 
-from .shared import (
+from devloop.shared import (
     ArchiveThreadInput,
     SendMessageInput,
     SendMessageOutput,
@@ -25,6 +23,7 @@ from .shared import (
 # --------------------------------------------------------------------------- #
 # MessagingPlatform protocol
 # --------------------------------------------------------------------------- #
+
 
 @runtime_checkable
 class MessagingPlatform(Protocol):
@@ -64,6 +63,7 @@ class MessagingPlatform(Protocol):
 # --------------------------------------------------------------------------- #
 # StubPlatform — test double satisfying MessagingPlatform
 # --------------------------------------------------------------------------- #
+
 
 @dataclass
 class StubPlatform:
@@ -111,6 +111,7 @@ class StubPlatform:
 # --------------------------------------------------------------------------- #
 # MessagingActivities — generic activity wrapper
 # --------------------------------------------------------------------------- #
+
 
 class MessagingActivities:
     """Wraps any ``MessagingPlatform`` to expose Temporal-compatible
