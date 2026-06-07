@@ -1,0 +1,22 @@
+[project]
+name = "extend-prompts-example"
+version = "0.1.0"
+requires-python = ">=3.12"
+# Extra runtime dependencies this project's agent needs beyond the agent-base
+# defaults (OpenHands SDK, omneval-devloop). httpx/pydantic stand in for
+# whatever your project's own internal tooling or APIs require — replace them
+# with your real list.
+dependencies = [
+    "httpx>=0.28",
+    "pydantic>=2.9",
+]
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+py-modules = []
+
+[tool.uv]
+package = false
