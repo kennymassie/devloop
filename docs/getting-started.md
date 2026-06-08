@@ -447,15 +447,6 @@ temporal workflow start \
 
 Replace `<project-id>` with the value from your Project Registry. Because the old run is in a terminal state (Failed or Completed), starting with the same workflow ID creates a clean new execution.
 
-## Extending devloop with Custom Workflows
-
-The devloop temporal worker can run custom workflows alongside the built-in
-DevLoop and Summarization workflows.  See the
-[Alert Response Workflow example](examples/alert-response/README.md) for a
-complete consumer extension pattern: install `omneval-devloop` as a dependency,
-write a custom `@workflow.defn`, register both in a single worker process, and
-reuse SDK activities for Kubernetes Job dispatch and GitHub Issue notifications.
-
 ## Project Registry Schema
 
 | Field                 | Required | Type  | Description                                      |

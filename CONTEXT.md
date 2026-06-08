@@ -24,6 +24,10 @@ _Avoid_: agent config, project database
 The container image (`ghcr.io/omneval/devloop-agent-base`) used as the `FROM` base for all per-project agent images. Contains the shared toolchain: OpenHands SDK, `omneval-devloop` (for the shared Agent Job output ConfigMap protocol and its pinned Temporal + kubernetes clients), git, gh CLI, kubectl, flux CLI, argocd CLI. Per-project images extend it with only the language runtime and prompts they need.
 _Avoid_: base container, shared agent image
 
+**Phase prompt template**:
+The markdown file (e.g. `implement.md`, `review.md`) that becomes the agent's primary instructions for one Dev Loop phase, rendered by `load_prompt` (`{{VAR}}` placeholder substitution; `_PROMPT_FILES` maps each phase — plan, execute, review, merge, diagnosis, ci_fix, answer, pr_comment, remediation — to its bundled filename). Always rendered, exactly one per phase, unconditionally — unlike an [Agent Skill](#agent-skill), which is conditionally surfaced. Language-agnostic defaults are baked into the Agent Base Image at `/usr/local/share/agent-prompts/`; a per-project image overrides individual templates by `COPY`-ing its own `prompts/<phase>.md` to the same path and filename — a build-time Docker layer overwrite, not the runtime stage-and-install merge the [Skills convergence directory](#skills-convergence-directory) uses. Templates a project doesn't override fall through to the agent-base default. Resolution order: `AGENT_PROMPTS_DIR` env override > `/usr/local/share/agent-prompts` > the bundled `prompts/` next to `entrypoint.py`.
+_Avoid_: prompt template, phase prompt, system prompt
+
 **Agent Job output ConfigMap**:
 The Kubernetes ConfigMap an Agent Execution Job writes its result to and reads a human's mid-run reply from — the message-bus seam between the Job and the Temporal Orchestration Worker. The agent writes the JSON-encoded result under the `result` key (`AgentJobResult.to_payload`); the worker polls and rebuilds it (`AgentJobResult.from_payload`). A blocking question parks the Job and the worker patches the answer back under the `human_answer` key. The contract (field set and key names) is owned once in `devloop.shared` so both `devloop-temporal-worker` and `devloop-agent-base` reference one definition.
 _Avoid_: result ConfigMap, status ConfigMap, output map
@@ -49,7 +53,7 @@ The two container images published to `ghcr.io/omneval/` by this repo: `devloop-
 _Avoid_: devloop containers, agent images (too generic)
 
 **Agent Skill**:
-A reusable, model-agnostic capability in the AgentSkills `SKILL.md` format (YAML frontmatter — `name`, `description`, optional OpenHands-only `triggers:` — plus a markdown body, optionally with `scripts/` `references/` `assets/`). Loaded by the OpenHands agent with native progressive disclosure: a skill's name/description appears in `<available_skills>` and the agent reads the full body on demand via `invoke_skill()`, so a skill costs almost no context until used. The same format the `npx skills` ecosystem publishes (agentskills.io). Distinct from a Phase prompt template (always rendered, one per phase) — a skill is conditionally surfaced and shared across phases.
+A reusable, model-agnostic capability in the AgentSkills `SKILL.md` format (YAML frontmatter — `name`, `description`, optional OpenHands-only `triggers:` — plus a markdown body, optionally with `scripts/` `references/` `assets/`). Loaded by the OpenHands agent with native progressive disclosure: a skill's name/description appears in `<available_skills>` and the agent reads the full body on demand via `invoke_skill()`, so a skill costs almost no context until used. The same format the `npx skills` ecosystem publishes (agentskills.io). Distinct from a [Phase prompt template](#phase-prompt-template) (always rendered, one per phase) — a skill is conditionally surfaced and shared across phases.
 _Avoid_: plugin, tool, microagent, prompt template
 
 **Skills convergence directory**:
