@@ -4,7 +4,8 @@ Triggered by ``webhook.py`` when a human posts a ``pull_request_review`` or an
 ``@devloop-bot``-mentioning ``issue_comment`` on an open ``agent/issue-<N>``
 PR. The workflow re-engages the agent on the existing branch:
 
-    "⏳ queued" ─▶ Phase.PR_COMMENT job (PR diff + comment/review body)
+    "⏳ queued" ─▶ Phase.PR_COMMENT job (PR number + comment/review body;
+                   the agent fetches the diff itself via ``gh pr diff``)
                  ─▶ CI Fix Loop (reuse of ``_WorkflowCommon._ci_fix_loop``)
                  ─▶ request reviewer + post result comment
 
@@ -16,6 +17,7 @@ wins as context.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from datetime import timedelta
 
@@ -25,7 +27,7 @@ from temporalio.common import RetryPolicy
 from . import dev_loop_logic as logic
 from ._workflow_common import _WorkflowCommon
 from .shared import (
-    GetPRDiffInput,
+    GetPRBranchInput,
     JobStatus,
     Phase,
     TaskSpec,
@@ -33,7 +35,18 @@ from .shared import (
 
 _RETRY = RetryPolicy(maximum_attempts=3)
 _GITHUB_COMMENT_TIMEOUT = timedelta(seconds=60)
-_DIFF_FETCH_TIMEOUT = timedelta(minutes=2)
+
+# Agent issue branches are named ``agent/issue-<N>[-slug]`` (see entrypoint.py /
+# github_ops._AGENT_BRANCH / webhook._AGENT_BRANCH). ``_handle_pull_request_review``
+# already filters on this before starting the workflow (the head ref comes free
+# in that payload); ``_handle_issue_comment`` can't — an ``issue_comment``
+# payload carries no head ref, only a PR number — so it dispatches with an
+# empty ``branch`` and lets ``get_pr_branch`` resolve it here. Re-checking the
+# resolved branch closes that gap: without it, an ``@devloop-bot`` mention on
+# *any* open PR (not just agent-owned ones) would resolve a real branch and
+# proceed to the entrypoint's ``force=True`` push — clobbering a human's work
+# (issue #101).
+_AGENT_BRANCH = re.compile(r"^agent/issue-(\d+)")
 
 
 @dataclass
@@ -118,22 +131,56 @@ class PRCommentWorkflow(_WorkflowCommon):
             "⏳ queued — agent is responding to reviewer feedback",
         )
 
-        diff = await workflow.execute_activity(
-            "get_pr_diff",
-            GetPRDiffInput(project_id=inp.project_id, pr_number=inp.pr_number),
-            result_type=str,
-            start_to_close_timeout=_DIFF_FETCH_TIMEOUT,
-            retry_policy=_RETRY,
-        )
+        # `issue_comment` (an ``@devloop-bot`` mention) webhook payloads carry
+        # no `pull_request.head.ref` — only `pull_request_review` does — so
+        # `inp.branch` arrives empty. Resolve it from the PR number before
+        # dispatching: an empty branch becomes `git clone --branch ''`, which
+        # fails the Agent Execution Job outright (issue #101).
+        branch = inp.branch
+        if not branch:
+            branch = await workflow.execute_activity(
+                "get_pr_branch",
+                GetPRBranchInput(inp.project_id, inp.pr_number),
+                start_to_close_timeout=_GITHUB_COMMENT_TIMEOUT,
+                retry_policy=_RETRY,
+            )
+        if not branch:
+            await self._comment(
+                inp.project_id,
+                issue_no,
+                f"❌ Could not respond to feedback — could not resolve PR #{inp.pr_number}'s branch",
+            )
+            return PRCommentResult(
+                status="failed",
+                pr_number=inp.pr_number,
+                detail="branch resolution failed",
+            )
+
+        # `_handle_pull_request_review` already filters to agent-owned PRs
+        # before starting this workflow (the head ref comes free in that
+        # payload); a comment-sourced run resolves its branch here instead, so
+        # it must be re-checked — otherwise an `@devloop-bot` mention on *any*
+        # open PR would reach the entrypoint's `force=True` push and clobber a
+        # human's branch (issue #101).
+        if not _AGENT_BRANCH.match(branch):
+            await self._comment(
+                inp.project_id,
+                issue_no,
+                f"❌ Could not respond to feedback — PR #{inp.pr_number} isn't an agent-owned PR (branch `{branch}`)",
+            )
+            return PRCommentResult(
+                status="failed",
+                pr_number=inp.pr_number,
+                detail="not an agent-owned branch",
+            )
 
         spec = TaskSpec(
             phase=Phase.PR_COMMENT.value,
             project_id=inp.project_id,
             issue_number=issue_no,
-            branch=inp.branch,
+            branch=branch,
             extra={
                 "pr_number": inp.pr_number,
-                "pr_diff": diff,
                 "comment_body": inp.comment_body,
                 "source": inp.source,
                 "author": inp.author,
@@ -168,7 +215,7 @@ class PRCommentWorkflow(_WorkflowCommon):
 
         exec_result = {
             "issue_id": issue_no,
-            "branch": result.branch or inp.branch,
+            "branch": result.branch or branch,
             "pr_url": pr_url,
             "commits": result.commits,
             "exhausted": False,

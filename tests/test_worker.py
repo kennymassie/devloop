@@ -17,6 +17,7 @@ from http.server import HTTPServer
 import httpx
 
 from devloop import DevLoopWorkflow, SummarizationWorkflow
+from devloop.github_ops import get_pr_branch, get_pr_diff
 from devloop.shared import ORCHESTRATION_QUEUE
 from devloop import worker
 
@@ -25,6 +26,31 @@ def test_reference_worker_registers_devloop_and_summarization():
     """The out-of-the-box worker registers both core workflows."""
     assert DevLoopWorkflow in worker.WORKFLOWS
     assert SummarizationWorkflow in worker.WORKFLOWS
+
+
+def test_get_pr_diff_remains_a_registered_activity():
+    """``get_pr_diff`` stays importable from ``devloop.github_ops`` and
+    registered on the orchestration queue.
+
+    Issue #99: PRCommentWorkflow stopped calling it (the agent fetches the
+    diff itself via ``gh pr diff``, #98), and a follow-up cleanup deleted the
+    now-internally-unused activity outright — breaking downstream workers
+    that import and register it directly on their own task queues. It's kept
+    as a standalone activity for exactly that kind of consumer.
+    """
+    assert get_pr_diff in worker.ORCHESTRATION_ACTIVITIES
+
+
+def test_get_pr_branch_is_a_registered_activity():
+    """``get_pr_branch`` is registered on the orchestration queue.
+
+    Issue #101: ``PRCommentWorkflow`` calls it (via ``execute_activity``'s
+    string-name lookup) to resolve a PR's head branch when the triggering
+    webhook event didn't carry it — an unregistered activity would make every
+    such dispatch fail at the Temporal level rather than just the empty-branch
+    ones it's meant to fix.
+    """
+    assert get_pr_branch in worker.ORCHESTRATION_ACTIVITIES
 
 
 def test_task_queue_defaults_to_orchestration_queue():

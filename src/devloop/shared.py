@@ -308,13 +308,29 @@ class ReviewerRequestResult:
 
 
 @dataclass
+class GetPRBranchInput:
+    """Input for the get_pr_branch activity.
+
+    Resolves a PR's head branch name from its number — needed when the event
+    that triggered ``PRCommentWorkflow`` didn't carry it. ``issue_comment``
+    webhook payloads (an ``@devloop-bot`` mention in a PR conversation)
+    reference the PR only by number; unlike ``pull_request_review`` payloads,
+    they carry no ``pull_request.head.ref`` (issue #101).
+    """
+
+    project_id: str
+    pr_number: int
+
+
+@dataclass
 class GetPRDiffInput:
     """Input for the get_pr_diff activity.
 
-    Fetches the unified diff for a PR (``Accept: application/vnd.github.diff``)
-    so ``PRCommentWorkflow`` can hand the reviewer/commenter's targeted feedback
-    *and* the actual code under discussion to the ``Phase.PR_COMMENT`` Agent
-    Execution Job via ``TaskSpec.extra``.
+    Standalone activity kept for consumers that register it directly
+    (``devloop.github_ops.get_pr_diff``) — devloop's own ``PRCommentWorkflow``
+    no longer calls it (the agent fetches the diff itself via ``gh pr diff``,
+    issue #98), but removing the symbol entirely broke downstream workers that
+    import it for registration on their own task queues.
     """
 
     project_id: str

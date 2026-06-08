@@ -39,6 +39,7 @@ from .projects import ProjectConfig, get_project, parse_github_repo
 from .shared import (
     CICheckFailure,
     CIChecksResult,
+    GetPRBranchInput,
     GetPRDiffInput,
     GithubNotificationInput,
     OpenAgentPRsInput,
@@ -276,7 +277,7 @@ def _log_github_api_failure(action: str, exc: Exception) -> None:
     Used by activities that should degrade gracefully on a transient
     GitHub-side hiccup (expired token, rate limit, missing permission, 404,
     5xx, connection error) rather than sinking the whole DevLoopWorkflow
-    round — the same posture ``get_pr_diff`` already takes. Logs the status
+    round — log-and-degrade rather than raise. Logs the status
     code plus a short excerpt of the response body; never logs headers
     (which carry the bearer token).
     """
@@ -397,7 +398,7 @@ async def post_github_comment(inp: GithubNotificationInput) -> None:
     connection error) is logged and swallowed rather than raised — Temporal
     would otherwise retry it up to ``_RETRY``'s limit and then fail the whole
     activity, sinking the round over what's usually a transient GitHub-side
-    hiccup (issue #87, same posture as ``get_pr_diff``).
+    hiccup (issue #87) — log-and-degrade rather than raise.
     """
     import httpx
 
@@ -437,7 +438,7 @@ async def request_github_reviewer(inp: RequestReviewerInput) -> ReviewerRequestR
     its notification honestly instead of assuming success (issue #88). A
     failed request (expired token, missing permission, PR not found, GitHub
     5xx, connection error) is logged and reported as "failed" rather than
-    raised (issue #87, same posture as ``get_pr_diff``).
+    raised (issue #87) — log-and-degrade rather than raise.
     """
     import httpx
 
@@ -484,14 +485,11 @@ async def request_github_reviewer(inp: RequestReviewerInput) -> ReviewerRequestR
 async def get_pr_diff(inp: GetPRDiffInput) -> str:
     """Fetch the unified diff for a PR via the GitHub REST API.
 
-    Used by ``PRCommentWorkflow`` (#78) to hand the ``Phase.PR_COMMENT`` Agent
-    Execution Job the actual code under discussion (alongside the
-    reviewer/commenter's feedback) in ``TaskSpec.extra["pr_diff"]`` — so the
-    agent can ground its targeted changes in exactly what the human is
-    responding to. Returns ``""`` for an unresolvable PR number rather than
-    raising, so a transient diff-fetch hiccup doesn't sink the whole workflow
-    (the agent still has the comment/review body and branch access to work
-    from).
+    Standalone activity kept for downstream consumers that register it
+    directly on their own task queues — devloop's own ``PRCommentWorkflow``
+    no longer calls it (the agent fetches the diff itself via ``gh pr diff``,
+    issue #98). Returns ``""`` for an unresolvable PR number rather than
+    raising, so a transient diff-fetch hiccup doesn't sink a caller's workflow.
     """
     if inp.pr_number <= 0:
         return ""
@@ -505,6 +503,36 @@ async def get_pr_diff(inp: GetPRDiffInput) -> str:
         resp = c.get(f"/repos/{repo}/pulls/{inp.pr_number}")
         resp.raise_for_status()
         return resp.text
+
+
+@activity.defn
+async def get_pr_branch(inp: GetPRBranchInput) -> str:
+    """Resolve a PR's head branch name from its number via the GitHub REST API.
+
+    ``PRCommentWorkflow`` calls this when the triggering webhook event didn't
+    carry the branch — ``issue_comment`` payloads (an ``@devloop-bot`` mention
+    on a PR) reference the PR only by number, unlike ``pull_request_review``
+    payloads which include ``pull_request.head.ref`` directly (issue #101).
+
+    Returns ``""`` on an unresolvable PR (404, rate limit, GitHub 5xx,
+    connection error) rather than raising — log-and-degrade (issue #87) so
+    the workflow can fail cleanly with an explanatory comment instead of
+    sinking the whole run on a transient GitHub-side hiccup. The caller
+    treats an empty result as "could not resolve" and refuses to dispatch
+    rather than risk an empty-branch clone or a wrong-ref push.
+    """
+    import httpx
+
+    cfg = get_project(inp.project_id)
+    repo = parse_github_repo(cfg.github_url)
+    try:
+        with await _client(cfg) as c:
+            resp = c.get(f"/repos/{repo}/pulls/{inp.pr_number}")
+            resp.raise_for_status()
+            return (resp.json().get("head") or {}).get("ref", "")
+    except httpx.HTTPError as exc:
+        _log_github_api_failure(f"get_pr_branch on {repo}#{inp.pr_number}", exc)
+        return ""
 
 
 _TERMINAL_CONCLUSIONS = {
@@ -534,8 +562,8 @@ async def poll_ci_checks(inp: PollCIChecksInput) -> CIChecksResult:
     A failed poll (expired token, rate limit, PR not found, GitHub 5xx,
     connection error) is logged and reported as "pending" — never as
     "failing" — so a transient GitHub-side hiccup makes the loop wait and
-    re-poll rather than dispatching a spurious fix (issue #87, same posture
-    as ``get_pr_diff``).
+    re-poll rather than dispatching a spurious fix (issue #87) — log-and-degrade
+    rather than raise.
     """
     import httpx
 
