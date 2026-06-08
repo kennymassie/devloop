@@ -80,9 +80,9 @@ spec:
               value: {{ . | quote }}
             {{- end }}
             - name: GIT_AUTHOR_NAME
-              value: {{ .Values.agent.gitName | default "homelab-agent" | quote }}
+              value: {{ .Values.agent.gitName | default "devloop-bot" | quote }}
             - name: GIT_AUTHOR_EMAIL
-              value: {{ .Values.agent.gitEmail | default "agent@blosshomelab.com" | quote }}
+              value: {{ .Values.agent.gitEmail | default "devloop-bot@omneval.com" | quote }}
             - name: SUMMARIZATION_ENABLED
               value: {{ .Values.summarization.enabled | default true | quote }}
             - name: SUMMARIZATION_CRON_SCHEDULE

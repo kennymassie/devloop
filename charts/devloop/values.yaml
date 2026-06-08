@@ -176,8 +176,8 @@ githubApp:
 # repositories. Forwarded to the agent container as GIT_AUTHOR_NAME /
 # GIT_AUTHOR_EMAIL (consumed by `git config user.name` / `user.email`).
 agent:
-  gitName: "homelab-agent"
-  gitEmail: "agent@blosshomelab.com"
+  gitName: "devloop-bot"
+  gitEmail: "devloop-bot@omneval.com"
 
 # ---------------------------------------------------------------------------
 # Weekly Summarization
