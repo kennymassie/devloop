@@ -25,6 +25,7 @@ from temporalio.client import (
     ScheduleUpdate,
     ScheduleUpdateInput,
 )
+from temporalio.service import RPCError, RPCStatusCode
 
 from .projects import ProjectConfig
 from .shared import ORCHESTRATION_QUEUE
@@ -178,9 +179,17 @@ async def _delete_if_exists(client: Client, schedule_id: str) -> None:
     try:
         await client.get_schedule_handle(schedule_id).delete()
         log.info("deleted schedule %s (disabled via config)", schedule_id)
+    except RPCError as exc:
+        if exc.status == RPCStatusCode.NOT_FOUND:
+            return
+        log.warning(
+            "could not delete schedule %s (ignored)",
+            schedule_id,
+            exc_info=True,
+        )
     except Exception:
         log.warning(
-            "could not delete schedule %s (may not exist; ignored)",
+            "could not delete schedule %s (ignored)",
             schedule_id,
             exc_info=True,
         )
