@@ -63,7 +63,7 @@ class Notifier:
         reviewer_result = await ops._phase_request_reviewer(  # ty: ignore[missing-argument]
             inp.project_id,
             pr_number,  # ty: ignore[invalid-argument-type]
-            callback=cb._phase_request_reviewer,  # ty: ignore[invalid-argument-type]
+            callback=cb._phase_request_reviewer_callback,  # ty: ignore[invalid-argument-type]
         )
         if reviewer_result.requested:
             reviewer_note = "Reviewer has been tagged."
@@ -89,10 +89,10 @@ class Notifier:
         self, project_id: str, pr_number: Optional[int], cb: PhaseOps
     ) -> Any:
         """Request a GitHub PR reviewer (or use injected callback)."""
-        if cb._phase_request_reviewer is not None:
-            return await cb._phase_request_reviewer(  # ty: ignore[missing-argument]
+        if cb._phase_request_reviewer_callback is not None:
+            return await cb._phase_request_reviewer_callback(  # ty: ignore[missing-argument]
                 project_id,  # ty: ignore[invalid-argument-type]
-                pr_number  # ty: ignore[invalid-argument-type]
+                pr_number,  # ty: ignore[invalid-argument-type]
             )
         return None
 
@@ -125,6 +125,7 @@ def _as_int(value: Any) -> int:
         return int(value)
     except (TypeError, ValueError):
         return 0
+
 
 class NotifierCallbacks(PhaseOps):
     """Backward-compatible shim that delegates to a ``PhaseOps`` instance.
