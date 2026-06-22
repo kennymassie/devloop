@@ -1,5 +1,5 @@
 """Tests for PhaseOps I/O methods — verify _comment, _dispatch, _cleanup,
-_request_reviewer, _emit_kpis mirror _WorkflowCommon functionality.
+_request_reviewer, _emit_kpis provide the unified callback protocol.
 
 These tests verify that PhaseOps has methods for each I/O operation that:
 1. Use injectable callback fields first when present
@@ -192,7 +192,7 @@ class TestPhaseOpsEmitKpis:
 
 
 class TestDevLoopWorkflowInheritsOnlyPhaseOps:
-    """Verify DevLoopWorkflow inherits only from PhaseOps (not _WorkflowCommon)."""
+    """Verify DevLoopWorkflow inherits only from PhaseOps."""
 
     def test_devloop_workflow_is_subclass_of_phase_ops(self) -> None:
         """DevLoopWorkflow must inherit from PhaseOps."""
@@ -200,13 +200,16 @@ class TestDevLoopWorkflowInheritsOnlyPhaseOps:
 
         assert issubclass(DevLoopWorkflow, PhaseOps)
 
-    def test_devloop_workflow_not_subclass_of_workflow_common(self) -> None:
-        """DevLoopWorkflow must NOT inherit from _WorkflowCommon."""
+    def test_devloop_workflow_single_inheritance(self) -> None:
+        """DevLoopWorkflow must have a single base class (PhaseOps)."""
         from devloop.dev_loop import DevLoopWorkflow
 
-        from devloop._workflow_common import _WorkflowCommon
-
-        assert not issubclass(DevLoopWorkflow, _WorkflowCommon)
+        # Only one non-object parent should be present
+        real_bases = [b for b in DevLoopWorkflow.__bases__ if b is not object]
+        assert len(real_bases) == 1, (
+            f"DevLoopWorkflow should inherit from exactly one base, got {real_bases}"
+        )
+        assert real_bases[0] is PhaseOps
 
     def test_devloop_workflow_has_phaseops_io_methods(self) -> None:
         """DevLoopWorkflow must have all 5 I/O methods."""
@@ -257,9 +260,8 @@ class TestPRCommentWorkflowExercisesPhaseOps:
         """PRCommentWorkflow must NOT inherit from _WorkflowCommon."""
         from devloop.pr_comment import PRCommentWorkflow
 
-        from devloop._workflow_common import _WorkflowCommon
-
-        assert not issubclass(PRCommentWorkflow, _WorkflowCommon)
+        # _WorkflowCommon was removed; verify via MRO that it's not present.
+        assert "_WorkflowCommon" not in [c.__name__ for c in PRCommentWorkflow.__mro__]
 
     def test_pr_comment_workflow_has_phaseops_io_methods(self) -> None:
         """PRCommentWorkflow must have all 5 I/O methods."""

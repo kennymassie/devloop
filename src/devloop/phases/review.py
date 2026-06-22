@@ -10,12 +10,10 @@ from datetime import timedelta
 from typing import Any, Callable, Coroutine, Optional
 
 from temporalio import workflow
-from temporalio.common import RetryPolicy
 
-from .._constants import _RETRY, JOB_DISPATCH_QUEUE
+from .._constants import _RETRY
 from ..dev_loop_logic import render_review_findings_comment
-from ..github import GithubNotificationInput
-from ..phases.phase_ops import PhaseOps
+from ..phases.phase_ops import PhaseOps, _PostCommentCallback
 from ..shared import (
     AgentJobResult,
     InlineComment,
@@ -31,7 +29,6 @@ _DispatchReviewCallback = Callable[
 _PostReviewFindingsCallback = Callable[
     [str, str, dict, AgentJobResult], Coroutine[Any, Any, None]
 ]
-_PostCommentCallback = Callable[[str, int, str], Coroutine[Any, Any, None]]
 
 
 class ReviewPhase:
@@ -70,6 +67,10 @@ class ReviewPhase:
         ops = PhaseOps()
         issue_no = ops.as_int(issue.get("id"))
 
+        # Use review_ops sub-protocol with fallback to top-level PhaseOps fields.
+        review_ops = cb.review_ops
+        _comment_cb = review_ops.comment or cb.post_comment
+
         spec = TaskSpec(
             phase="review",
             project_id=inp.project_id,
@@ -80,14 +81,15 @@ class ReviewPhase:
             inp.project_id,
             issue_no,
             "⏳ queued — agent is reviewing this issue",
-            callback=cb.post_comment,
+            callback=_comment_cb,
         )
+        _dispatch_cb = review_ops.dispatch_review or cb.dispatch_review
         result = await ops.dispatch_helper(
             inp.project_id,
             spec,
             issue_number=issue_no,
             poll_interval_seconds=inp.poll_interval_seconds,
-            dispatch_callback=cb.dispatch_review,
+            dispatch_callback=_dispatch_cb,
             activity_name="dispatch_agent_job",
         )
         review = result.review or {}
@@ -97,54 +99,28 @@ class ReviewPhase:
                 inp.project_id,
                 issue_no,
                 f"🔎 Reviewed #{issue_no} — verdict: {verdict}.",
-                callback=cb.post_comment,
+                callback=_comment_cb,
             )
         else:
             await ops._phase_comment(
                 inp.project_id,
                 issue_no,
                 f"🔎 Reviewed #{issue_no} — no changes needed.",
-                callback=cb.post_comment,
+                callback=_comment_cb,
             )
 
         # Post the reviewer's findings to the PR.
+        _post_review_cb = review_ops.post_review_findings or cb.post_review_findings
         await self._post_review_findings(
             inp.project_id,
             exec_result.get("pr_url", ""),
             review or {},
             result,
             cb,
+            _post_review_cb,
         )
 
         return review or None
-
-    async def _dispatch_review(
-        self,
-        project_id: str,
-        spec: TaskSpec,
-        issue_number: int,
-        poll_interval_seconds: float,
-        cb: PhaseOps,
-    ) -> AgentJobResult:
-        """Dispatch the review agent job."""
-        if cb.dispatch_review is not None:
-            result = await cb.dispatch_review(
-                project_id, spec, issue_number, poll_interval_seconds
-            )
-        else:
-            ops = PhaseOps()
-            result = await ops.dispatch_helper(
-                project_id,
-                spec,
-                issue_number,
-                poll_interval_seconds,
-                dispatch_callback=cb.dispatch_review,
-                activity_name="dispatch_agent_job",
-                task_queue=JOB_DISPATCH_QUEUE,
-            )
-        if result.status != "awaiting_human":
-            await ops._phase_cleanup(result.job_name)
-        return result
 
     async def _post_review_findings(
         self,
@@ -153,6 +129,9 @@ class ReviewPhase:
         review: dict,
         result: AgentJobResult,
         cb: PhaseOps,
+        post_review_findings_callback: Optional[
+            Callable[[str, str, dict, AgentJobResult], Coroutine[Any, Any, None]]
+        ] = None,
     ) -> None:
         """Post the reviewer's findings to the PR.
 
@@ -162,8 +141,9 @@ class ReviewPhase:
         plain issue comment so findings still surface instead of dropping
         them or crashing the run.
         """
-        if cb.post_review_findings is not None:
-            await cb.post_review_findings(project_id, pr_url, review, result)
+        _cb = post_review_findings_callback or cb.post_review_findings
+        if _cb is not None:
+            await _cb(project_id, pr_url, review, result)
             return
         # Default: real Temporal activity path.
         ops = PhaseOps()
@@ -193,24 +173,6 @@ class ReviewPhase:
             PostCommentsInput(project_id, pr_number, summary, inline),
             start_to_close_timeout=timedelta(minutes=2),
             retry_policy=_RETRY,
-        )
-
-    async def _comment(
-        self, project_id: str, issue_number: int, body: str, cb: PhaseOps
-    ) -> None:
-        """Post a GitHub Issue/PR comment."""
-        if cb.post_comment is not None:
-            await cb.post_comment(project_id, issue_number, body)
-            return
-        await workflow.execute_activity(
-            "post_github_comment",
-            GithubNotificationInput(
-                issue_number=issue_number,
-                project_id=project_id,
-                body=body,
-            ),
-            start_to_close_timeout=timedelta(seconds=30),
-            retry_policy=RetryPolicy(maximum_attempts=3),
         )
 
 

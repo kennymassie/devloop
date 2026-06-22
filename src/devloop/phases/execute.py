@@ -9,19 +9,10 @@ and delegates to ``CICycle`` for the CI fix loop.
 
 from __future__ import annotations
 
-from datetime import timedelta
 from typing import Any, Callable, Coroutine, Optional
 
-from temporalio import workflow
-from temporalio.common import RetryPolicy
-
-from .._constants import (
-    _GITHUB_COMMENT_TIMEOUT,
-    _RETRY,
-    JOB_DISPATCH_QUEUE,
-)
-from ..github import GithubNotificationInput
 from ..phases.cycle import CICycle
+from ..phases.execute_phase_ops import ExecutePhaseOps
 from ..phases.phase_ops import PhaseOps
 from ..projects import get_project
 from ..shared import (
@@ -126,23 +117,28 @@ class ExecutePhase:
         max_iters = inp.execute_max_iterations
         result = None
         for attempt in range(1, max_iters + 1):
-            if cb.kpi_bump is not None:
+            exec_ops = cb.execute_ops
+            if exec_ops.kpi_bump is not None:
+                await exec_ops.kpi_bump("execute_attempts", 1)
+            elif cb.kpi_bump is not None:
                 await cb.kpi_bump("execute_attempts", 1)
             await ops._phase_comment(
                 inp.project_id,
                 issue_no,
                 "⏳ queued — agent is working on this issue",
-                callback=cb.post_comment,
+                callback=exec_ops.comment or cb.comment or cb.post_comment,
             )
             result = await ops.dispatch_helper(
                 inp.project_id,
                 spec,
                 issue_number=issue_no,
                 poll_interval_seconds=inp.poll_interval_seconds,
-                dispatch_callback=cb.dispatch_execute,
+                dispatch_callback=exec_ops.dispatch_execute or cb.dispatch_execute,
             )
             # Resolve mid-run AWAITING_HUMAN questions.
-            result = await self._answer_questions(inp.project_id, issue_no, result, cb)
+            result = await self._answer_questions(
+                inp.project_id, issue_no, result, cb, exec_ops
+            )
 
             if result.status != JobStatus.COMPLETE.value or result.commits:
                 break
@@ -155,7 +151,7 @@ class ExecutePhase:
                 inp.project_id,
                 issue_no,
                 "❌ Parked — execute phase failed: execute_max_iterations must be >= 1",
-                callback=cb.post_comment,
+                callback=exec_ops.comment or cb.comment or cb.post_comment,
             )
             return {
                 "issue_id": issue_no,
@@ -170,7 +166,7 @@ class ExecutePhase:
                 inp.project_id,
                 issue_no,
                 f"❌ Parked — execute phase failed: {result.error or 'unknown error'}",
-                callback=cb.post_comment,
+                callback=exec_ops.comment or cb.comment or cb.post_comment,
             )
             return {
                 "issue_id": issue_no,
@@ -186,7 +182,7 @@ class ExecutePhase:
                 issue_no,
                 f"❌ Execute exhausted {max_iters} attempts with no commits"
                 " — skipping this round",
-                callback=cb.post_comment,
+                callback=exec_ops.comment or cb.comment or cb.post_comment,
             )
             return {
                 "issue_id": issue_no,
@@ -200,7 +196,7 @@ class ExecutePhase:
             inp.project_id,
             issue_no,
             f"✅ Implemented — PR: {result.pr_url or result.branch}",
-            callback=cb.post_comment,
+            callback=exec_ops.comment or cb.comment or cb.post_comment,
         )
         exec_result = {
             "issue_id": issue_no,
@@ -224,39 +220,13 @@ class ExecutePhase:
         exec_result["exhausted"] = cycle_result.exhausted
         return exec_result
 
-    async def _dispatch_execute(
-        self,
-        project_id: str,
-        spec: TaskSpec,
-        issue_number: int,
-        poll_interval_seconds: float,
-        cb: PhaseOps,
-    ) -> AgentJobResult:
-        """Dispatch the execute agent job (or use injected callback)."""
-        if cb.dispatch_execute is not None:
-            result = await cb.dispatch_execute(
-                project_id, spec, issue_number, poll_interval_seconds
-            )
-        else:
-            ops = PhaseOps()
-            result = await ops.dispatch_helper(
-                project_id,
-                spec,
-                issue_number,
-                poll_interval_seconds,
-                dispatch_callback=cb.dispatch_execute,
-                task_queue=JOB_DISPATCH_QUEUE,
-            )
-        if result.status != JobStatus.AWAITING_HUMAN.value:
-            await self._cleanup(result.job_name, cb)
-        return result
-
     async def _answer_questions(
         self,
         project_id: str,
         issue_no: int,
         result: AgentJobResult,
         cb: PhaseOps,
+        exec_ops: Optional[ExecutePhaseOps] = None,
     ) -> AgentJobResult:
         """Resolve mid-run AWAITING_HUMAN questions.
 
@@ -267,42 +237,11 @@ class ExecutePhase:
         """
         if result.status != JobStatus.AWAITING_HUMAN.value:
             return result
-        if cb.answer_question is not None:
-            return await cb.answer_question(project_id, issue_no, result)
+        ops = exec_ops or cb.execute_ops
+        if ops.answer_question is not None:
+            return await ops.answer_question(project_id, issue_no, result)
         # Default: no question resolution — return result as-is.
         return result
-
-    async def _comment(
-        self, project_id: str, issue_number: int, body: str, cb: PhaseOps
-    ) -> None:
-        """Post a GitHub Issue/PR comment."""
-        if cb.post_comment is not None:
-            await cb.post_comment(project_id, issue_number, body)
-            return
-        await workflow.execute_activity(
-            "post_github_comment",
-            GithubNotificationInput(
-                issue_number=issue_number,
-                project_id=project_id,
-                body=body,
-            ),
-            start_to_close_timeout=_GITHUB_COMMENT_TIMEOUT,
-            retry_policy=_RETRY,
-        )
-
-    async def _cleanup(self, job_name: str, cb: PhaseOps) -> None:
-        """Delete the output ConfigMap for a completed job."""
-        if not job_name:
-            return
-        try:
-            await workflow.execute_activity(
-                "cleanup_configmap",
-                job_name,
-                start_to_close_timeout=timedelta(seconds=30),
-                retry_policy=RetryPolicy(maximum_attempts=1),
-            )
-        except Exception:  # noqa: BLE001
-            workflow.logger.warning("cleanup_configmap failed for %s", job_name)
 
 
 def _as_int(value: Any) -> int:
